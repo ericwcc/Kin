@@ -28,11 +28,7 @@ def parse_input_mappers(args, input_mappers):
     for mapper in args.mapper:
         kv_op = KV_OP_PATTERN.match(mapper)
         if kv_op:
-            key = kv_op.group('key')
-            if not key in input_mappers:
-                print(f'error: unknown key {key}')
-                continue
-            input_mappers[key] = kv_op.group('value')
+            input_mappers[kv_op.group('key')] = kv_op.group('value')
         index_op = INDEX_OP_PATTERN.match(mapper)
         if index_op:
             key = index_op.group('key')
@@ -61,19 +57,20 @@ def kafka_error_cb(err):
 
 def publish(args):
     input_filters = {
-        'column': list(),
-        'filename': list()
+        'column': [],
+        'filename': []
     }
 
     parse_input_filters(args, input_filters)
 
-    input_mappers = {
-        'filename': None
-    }
+    input_mappers = {}
 
     parse_input_mappers(args, input_mappers)
 
-    publisher = MessagePublisher({'error_cb': kafka_error_cb, 'bootstrap.servers': args.bootstrap_servers})
+    publisher = MessagePublisher({'message.timeout.ms': 10,
+                                  'socket.timeout.ms': 10,
+                                  'error_cb': kafka_error_cb, 
+                                  'bootstrap.servers': args.bootstrap_servers})
 
     try:
         for file in os.listdir(args.directory):
@@ -94,7 +91,7 @@ def publish(args):
                     line = f.readline().rstrip()
                     headers = line.split(',')
                 
-                indexed_column_filters = list()
+                indexed_column_filters = []
                 for index, op, value in input_filters['column']:
                     if headers:
                         if index in headers:
@@ -118,7 +115,7 @@ def publish(args):
                         print(f'error: row must have the same number of cells as the headers, headers={headers}, cells={cells}')
                         continue
 
-                    valued_column_filters = list()
+                    valued_column_filters = []
                     for i, (index, op, value) in enumerate(indexed_column_filters):
                         if index < len(cells):
                             valued_column_filters.append((cells[index], op, value))
@@ -132,8 +129,8 @@ def publish(args):
                         cell_dict = { headers[i] if headers else f'column_{i}': cell for i, cell in enumerate(cells) }
                         payload_dict = { **cell_dict, 'filename': file[:-4] }
                         mapped_payload_dict = { input_mappers.get(k, k) : v for k, v in payload_dict.items() }
-                        
                         mapped_payload_json = json.dumps(mapped_payload_dict).encode('utf-8')
+
                         success = publisher.produce(topic=args.topic, key='1', value=mapped_payload_json)
                         if not success:
                             print(f'error: failed to publish message, row={line}')
@@ -150,10 +147,10 @@ def parse_args():
     publish_parser = subparsers.add_parser('publish')
     publish_parser.add_argument("directory")
     publish_parser.add_argument('--topic', required=True)
-    publish_parser.add_argument('--bootstrap-servers', required=True)
+    publish_parser.add_argument('--bootstrap-servers', required=os.getenv('env', 'prod') == 'prod')
     publish_parser.add_argument('--no-header', action='store_true')
-    publish_parser.add_argument('--filter', action='append')
-    publish_parser.add_argument('--mapper', action='append')
+    publish_parser.add_argument('--filter', action='append', default=[])
+    publish_parser.add_argument('--mapper', action='append', default=[])
     publish_parser.set_defaults(func=publish)
     return parser.parse_args()
 

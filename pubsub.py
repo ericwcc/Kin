@@ -16,9 +16,9 @@ class MessagePublisher:
     def flush(self):
         self._producer.flush()
 
-    def _ack(err, msg):
+    def _ack(self, err, msg):
         if err:
-            print(f'kafka: received error callback, error={err.str()}')
+            print(f'kafka error: {err.str()}, message={msg.value()}')
         else:
             print(f'kafka: received callback, message={msg.value()}')
     
